@@ -5,7 +5,7 @@ Visualize Meta-Neighborhood with 2d spiral data
 python main.py --update_lr=20 --num_updates=1 --init_with_training_data=False --num_slots=100
 
 Figures illustrating the movement of keys will be saved in a folder in the root dir.
-![alt text](https://files.slack.com/files-pri/TG48YSKFY-FJERB2AF9/random.gif)
+![](random.gif)
 update_lr: inner loop learning rate.
 
 num_updates: inner loop finetune steps.
