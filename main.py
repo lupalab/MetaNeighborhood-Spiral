@@ -5,10 +5,13 @@ import matplotlib.pyplot as plt
 from tensorflow.python.platform import flags
 import os
 FLAGS = flags.FLAGS
-flags.DEFINE_float('update_lr', 1e-3, 'step size alpha for inner gradient update.') # 0.1 for omniglot
+flags.DEFINE_float('update_lr', 10, 'step size alpha for inner gradient update.') # 0.1 for omniglot
 flags.DEFINE_integer('num_updates', 1, 'number of inner gradient updates during training.')
 flags.DEFINE_bool('init_with_training_data', False, 'Whether init k and v with training data.')
 flags.DEFINE_integer('num_slots', 100, 'Number of slots in memory.')
+flags.DEFINE_bool('vanilla', False, 'if true, run vanilla model.')
+flags.DEFINE_integer('num_layers', 0, 'number of fully connected hidden layers.')
+flags.DEFINE_integer('num_neurons', 2, 'number of neurons at each layer.')
 def make_one_hot(y, num_classes=2):
     one_hot = np.zeros((y.shape[0], num_classes))
     for i in range(y.shape[0]):
@@ -68,7 +71,7 @@ def weighted_sigmoid_binary_cross_entropy_loss(pred, label, weights):
     return result
 
 class MODEL:
-    def __init__(self, num_slots=100, update_steps=FLAGS.num_updates, num_fc_layers=0, num_neurons=2):
+    def __init__(self, num_slots=100, update_steps=FLAGS.num_updates, num_fc_layers=FLAGS.num_layers, num_neurons=FLAGS.num_neurons):
         self.batch_size = tf.placeholder(dtype=tf.int32, shape=[])
         self.num_slots = num_slots
         self.update_steps = update_steps
@@ -175,70 +178,103 @@ class MODEL:
          
 
 m = MODEL(num_slots=FLAGS.num_slots)
-m.construct_meta_model()
+if FLAGS.vanilla:
+    m.construct_vanilla_model()
+else:
+    m.construct_meta_model()
 
 num_steps = 1000000
 batch_size = 32
 sess = tf.InteractiveSession()
 tf.global_variables_initializer().run()
 
-if not os.path.exists('./'+str(FLAGS.update_lr)+'_'+str(FLAGS.num_updates)):
-    os.makedirs('./'+str(FLAGS.update_lr)+'_'+str(FLAGS.num_updates))
-for itr in range(num_steps):
-    feed_dict = {m.batch_size:32, m.x: X_train[itr*batch_size % 1600:(itr+1)*batch_size %1600,:], m.y: y_train[itr*batch_size%1600:(itr+1)*batch_size%1600,:]}
-    input_tensors = [m.meta_loss, m.train_op, m.sim]
-    loss, _, sim = sess.run(input_tensors, feed_dict=feed_dict)
-    if itr % 10 == 0:
-        print(itr,loss)
 
-        #plt.show()
-        val_loss_total = 0
-        count = 0
-        preds = []
-        for i in range(int(1600/32)):
-            feed_dict = {m.batch_size:32, m.x: X_val[i*32:(i+1)*32,:], m.y: y_val[i*32:(i+1)*32]}
-            val_loss, pred, key, v, inputa, b_before, b_after, max_idx, gradients = sess.run([m.meta_loss, m.pred, m.memo_weights['k'], m.memo_weights['v'], m.memo_weights['m'], m.b_before, m.b_after, m.max_idx, m.gradients], feed_dict=feed_dict)
-            count += 1
-            preds.append(pred)
-            val_loss_total += val_loss
-        #print('b before')
-        #print(b_before)
-        #print('b_after')
-        #print(b_after)
-        print('validation loss:' + str(val_loss))
-        #print('max idx')
-        #print(max_idx)
-        #print('gradients')
-        #print(gradients)
-       
-        pred = np.concatenate(preds, axis=0)
-        pred = np.squeeze(pred)
-        fig1 = plt.gcf()
-        plt.xlim(-2,2)
-        plt.ylim(-2,2)
-        plt.title('pred')
-        plt.plot(X_val[pred==0,0], X_val[pred==0,1], 'bo', label='class 1')
-        plt.plot(X_val[pred==1,0], X_val[pred==1,1], 'ro', label='class 2')
-        plt.plot(key[np.squeeze(v)<=0.5,0],key[np.squeeze(v)<=0.5,1],'y+', label='+keys')
-        plt.plot(key[np.squeeze(v)>0.5,0],key[np.squeeze(v)>0.5,1],'yo', label='-keys')
-        plt.legend()
-        plt.close()
-        #plt.show()
-        fig1.savefig('./'+str(FLAGS.update_lr)+'_'+str(FLAGS.num_updates)+'/'+str(itr)+'.png')
-val_loss_total = 0
-count = 0
-preds = []
-for i in range(int(1600/32)):
-    feed_dict = {m.batch_size:32, m.x: X_val[i*32:(i+1)*32,:], m.y: y_val[i*32:(i+1)*32]}
-    val_loss, pred = sess.run([m.meta_loss, m.pred], feed_dict=feed_dict)
-    count += 1
-    preds.append(pred)
-    val_loss_total += val_loss
-print('validation loss:' + str(val_loss))
-pred = np.concatenate(preds, axis=0)
-pred = np.squeeze(pred)
-plt.title('pred')
-plt.plot(X_val[pred==0,0], X_val[pred==0,1], '.', label='class 1')
-plt.plot(X_val[pred==1,0], X_val[pred==1,1], '.', label='class 2')
-plt.legend()
-#plt.show()
+
+if FLAGS.vanilla:
+    if not os.path.exists('./vanilla'):
+        os.makedirs('./vanilla')
+    for itr in range(num_steps):
+        feed_dict = {m.batch_size:32, m.x: X_train[itr*batch_size % 1600:(itr+1)*batch_size %1600,:], m.y: y_train[itr*batch_size%1600:(itr+1)*batch_size%1600,:]}
+        input_tensors = [m.vanilla_loss, m.train_op]
+        loss, _ = sess.run(input_tensors, feed_dict=feed_dict)
+        if itr % 10 == 0:
+            print(itr,loss)
+
+            #plt.show()
+            val_loss_total = 0
+            count = 0
+            preds = []
+            for i in range(int(1600/32)):
+                feed_dict = {m.batch_size:32, m.x: X_val[i*32:(i+1)*32,:], m.y: y_val[i*32:(i+1)*32]}
+                val_loss, pred = sess.run([m.vanilla_loss, m.pred], feed_dict=feed_dict)
+                count += 1
+                preds.append(pred)
+                val_loss_total += val_loss
+            #print('b before')
+            #print(b_before)
+            #print('b_after')
+            #print(b_after)
+            print('validation loss:' + str(val_loss))
+            #print('max idx')
+            #print(max_idx)
+            #print('gradients')
+            #print(gradients)
+        
+            pred = np.concatenate(preds, axis=0)
+            pred = np.squeeze(pred)
+            fig1 = plt.gcf()
+            plt.xlim(-2,2)
+            plt.ylim(-2,2)
+            plt.title('pred')
+            plt.plot(X_val[pred==0,0], X_val[pred==0,1], 'bo', label='class 1')
+            plt.plot(X_val[pred==1,0], X_val[pred==1,1], 'ro', label='class 2')
+            plt.legend()
+            plt.close()
+            #plt.show()
+            
+            fig1.savefig('./vanilla/'+str(itr)+'.png')
+else:
+    if not os.path.exists('./'+str(FLAGS.update_lr)+'_'+str(FLAGS.num_updates)):
+        os.makedirs('./'+str(FLAGS.update_lr)+'_'+str(FLAGS.num_updates))
+    
+    for itr in range(num_steps):
+        feed_dict = {m.batch_size:32, m.x: X_train[itr*batch_size % 1600:(itr+1)*batch_size %1600,:], m.y: y_train[itr*batch_size%1600:(itr+1)*batch_size%1600,:]}
+        input_tensors = [m.meta_loss, m.train_op]
+        loss, _ = sess.run(input_tensors, feed_dict=feed_dict)
+        if itr % 10 == 0:
+            print(itr,loss)
+
+            #plt.show()
+            val_loss_total = 0
+            count = 0
+            preds = []
+            for i in range(int(1600/32)):
+                feed_dict = {m.batch_size:32, m.x: X_val[i*32:(i+1)*32,:], m.y: y_val[i*32:(i+1)*32]}
+                val_loss, pred, key, v = sess.run([m.meta_loss, m.pred, m.memo_weights['k'], m.memo_weights['v']], feed_dict=feed_dict)
+                count += 1
+                preds.append(pred)
+                val_loss_total += val_loss
+            #print('b before')
+            #print(b_before)
+            #print('b_after')
+            #print(b_after)g
+            print('validation loss:' + str(val_loss))
+            #print('max idx')
+            #print(max_idx)
+            #print('gradients')
+            #print(gradients)
+        
+            pred = np.concatenate(preds, axis=0)
+            pred = np.squeeze(pred)
+            fig1 = plt.gcf()
+            plt.xlim(-2,2)
+            plt.ylim(-2,2)
+            plt.title('pred')
+            plt.plot(X_val[pred==0,0], X_val[pred==0,1], 'bo', label='class 1')
+            plt.plot(X_val[pred==1,0], X_val[pred==1,1], 'ro', label='class 2')
+            plt.plot(key[np.squeeze(v)<=0.5,0],key[np.squeeze(v)<=0.5,1],'y+', label='+keys')
+            plt.plot(key[np.squeeze(v)>0.5,0],key[np.squeeze(v)>0.5,1],'yo', label='-keys')
+            plt.legend()
+            plt.close()
+            #plt.show()
+            fig1.savefig('./'+str(FLAGS.update_lr)+'_'+str(FLAGS.num_updates)+'/'+str(itr)+'.png')
